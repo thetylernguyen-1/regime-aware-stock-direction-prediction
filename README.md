@@ -77,14 +77,8 @@ These files are the direct result tables behind the final report's main numerica
 - `legacy/earlier_hmm_experiments/`
 - `legacy/exploratory_notebooks/`
 - `legacy/old_figures/`
-- `legacy/report_materials/`
 - `legacy/notes_and_review_files/`
 
-The full original notebook/output bundle is archived at:
-
-- `legacy/report_materials/full_notebook_output_bundle/`
-
-Use that archived bundle if you need every generated intermediate file, helper Python module, old notebook, or full reproducibility context.
 
 ## Consistency Note
 
