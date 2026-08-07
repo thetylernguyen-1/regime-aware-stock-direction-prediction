@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+
+# Large generated artifacts should stay out of normal commits unless explicitly needed.
+models/
+*.keras
+
+# Keep the clean root outputs, but ignore bulky archived generated caches.
+legacy/report_materials/development_environment/
+legacy/report_materials/generated_cache/

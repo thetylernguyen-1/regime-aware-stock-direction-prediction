@@ -1,0 +1,136 @@
+\section{Methodology}
+
+\subsection{Research Design and Primary Controlled Comparison}
+
+The final research question was: does an HMM-derived probability provide incremental out-of-sample value for weekly LSTM stock-direction forecasting beyond stock-specific technical features? The primary design is therefore a controlled feature-ablation experiment. For each stock, two LSTM classifiers were compared: a technical-only LSTM and a technical-plus-HMM LSTM. The two models used the same ticker-specific observations, target definition, chronological split, technical features, lookback grid, architecture, optimizer, loss function, batch size, early-stopping rule, random seeds, model-selection criterion, and threshold-selection procedure. The intended difference was the addition of one HMM feature.
+
+The primary comparison used AAPL, IBM, and MSFT. Daily OHLCV data were downloaded through \texttt{yfinance} with auto-adjusted price fields and were resampled to Friday-labelled weekly observations. Weekly open, high, low, close, and volume were constructed using first open, maximum high, minimum low, last close, and summed volume. The weekly target was the next-week direction:
+\[
+y_{i,w+1}=\mathbf{1}\{r_{i,w+1}>0\},
+\]
+where \(r_{i,w+1}\) is the next weekly log return for stock \(i\). Zero returns were assigned to the non-positive class. Splits were chronological and ticker-specific, using \texttt{Target\_Date}: 565 training rows, 121 validation rows, and 122 test rows per ticker before lookback sequence construction. Validation data were used for model selection and threshold selection; test data were reserved for final evaluation.
+
+Broader volatility, QQQ, recession/expansion, richer HMM, three-state HMM, target-overlap, calibration, and rolling-fold analyses were treated as secondary exploratory or robustness analyses rather than as the primary confirmatory comparison.
+
+\subsection{Two-State Gaussian HMM}
+
+For the primary fixed-split analysis, a separate two-state Gaussian HMM was fitted for each ticker. The observed HMM variable was the weekly log return, standardized per ticker using a \texttt{StandardScaler} fitted on training rows only. The hidden state \(S_{i,w}\) follows a first-order Markov chain:
+\[
+S_{i,w}\in\{0,1\}, \qquad
+\Pr(S_{i,w}=b \mid S_{i,w-1}=a)=A_{i,ab}.
+\]
+Conditional on the state, the train-standardized weekly log return \(x_{i,w}\) follows a univariate Gaussian emission distribution:
+\[
+x_{i,w}\mid S_{i,w}=k \sim \mathcal{N}(\mu_{i,k},\sigma^2_{i,k}).
+\]
+The implemented HMM used \texttt{GaussianHMM} with two components, full covariance, maximum 500 iterations, tolerance \(10^{-4}\), \texttt{min\_covar}= \(10^{-4}\), and random seed 42. Although the covariance type was \texttt{full}, the primary emission is univariate because only \texttt{Weekly\_Log\_Return} entered the HMM.
+
+Raw state numbers were not treated as economically meaningful. After fitting, states were labelled using training rows only: the state with the higher training-sample mean weekly log return was labelled bullish, and the other state was labelled bearish. Volatility and positive-return frequency did not determine the bullish/bearish label, although they were used later for diagnostic interpretation.
+
+\subsection{Construction of HMM Predictive Features}
+
+The predictive HMM feature was based on causal filtered probabilities rather than smoothed probabilities. For each ticker, the forward recursion produced
+\[
+\alpha_{i,w,k}=\Pr(S_{i,w}=k\mid x_{i,1:w}),
+\]
+which uses information only through week \(w\). One-step-ahead state probabilities were then computed as
+\[
+\pi^{S}_{i,w+1,k}=\sum_a \alpha_{i,w,a}A_{i,ak}.
+\]
+
+The final HMM probability feature was not the next-week bullish-regime probability. The upstream weekly HMM notebook estimated a state-specific positive-return rate from training rows,
+\[
+\hat{u}_{i,k}=\Pr(r_{i,w}>0\mid S_{i,w}=k),
+\]
+using hard state assignments in the training sample. The HMM-implied next-week up probability was then
+\[
+q_{i,w+1}=\sum_k \pi^{S}_{i,w+1,k}\hat{u}_{i,k}.
+\]
+This was saved as \texttt{HMM\_Positive\_Return\_Prob\_Next}. In the controlled comparison it was renamed to \texttt{HMM\_Up\_Prob\_Raw}. The HMM-LSTM did not use the raw value directly; it used \texttt{HMM\_Up\_Prob\_Scaled}, obtained by fitting a separate \texttt{StandardScaler} to \texttt{HMM\_Up\_Prob\_Raw} on each ticker's training rows. Only this one HMM feature was added to the LSTM input. The complementary down probability was omitted because it is redundant in a binary probability setting.
+
+\subsection{LSTM Classifiers and Feature Ablation}
+
+The technical input set contained the following 15 variables:
+\[
+\begin{aligned}
+&\texttt{Weekly\_Log\_Return},\ \texttt{Weekly\_Open\_Close\_Log\_Return},\ \texttt{Weekly\_High\_Low\_Range},\\
+&\texttt{Weekly\_Volume\_Change},\ \texttt{Rolling\_Vol\_4},\ \texttt{Rolling\_Vol\_12},\ \texttt{Rolling\_Vol\_26},\\
+&\texttt{Momentum\_4},\ \texttt{Momentum\_12},\ \texttt{Momentum\_26},\\
+&\texttt{MA\_Gap\_4},\ \texttt{MA\_Gap\_12},\ \texttt{MA\_Gap\_26},\ \texttt{Drawdown\_12},\ \texttt{Drawdown\_26}.
+\end{aligned}
+\]
+These features were standardized per ticker using training rows only. For a lookback length \(L\), each LSTM input was a sequence \(X_{i,w-L+1:w}\). The split assigned to a sequence was determined by the target row, so validation and test sequences could include earlier historical observations from previous splits, but the target date was always later than every input date in the sequence.
+
+The HMM-augmented input set contained the same 15 technical variables plus \texttt{HMM\_Up\_Prob\_Scaled}. No QQQ, VIX, VXN, recession, relative-return, future-return, target, smoothed-HMM, or \texttt{HMM\_Bullish\_Prob\_Next} feature entered the primary controlled LSTM comparison.
+
+\begin{table}[H]
+\centering
+\caption{Final controlled LSTM architecture and training settings.}
+\label{tab:method-lstm-architecture}
+\small
+\begin{tabular}{ll}
+\toprule
+Component & Controlled setting \\
+\midrule
+Input shape & \((L,p)\), where \(L\in\{4,8,12\}\) and \(p=15\) or \(16\) \\
+LSTM layers & One LSTM layer \\
+Hidden units & 16 \\
+Dense layers & One dense ReLU layer with 8 units \\
+Dropout & 0.20 in the LSTM and after the dense layer \\
+Recurrent dropout & 0.00 \\
+Output layer & One sigmoid unit, interpreted as \(\Pr(y=1)\) \\
+Loss & Binary cross-entropy \\
+Optimizer & Adam \\
+Learning rate & 0.001 \\
+Batch size & 32 \\
+Maximum epochs & 150 \\
+Early stopping & Validation AUC, patience 12, restore best weights \\
+Seeds & 7, 19, 42, 91, 123 \\
+Class weights & None \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Model Selection and Training}
+
+The final controlled lookback grid was \(\{4,8,12\}\) weeks. For each ticker, feature set, lookback, and seed, a separate LSTM was trained. The selected lookback for each ticker and feature set was the lookback with the highest mean validation ROC-AUC across the five seeds, with shorter lookbacks preferred in ties. Technical-only and technical-plus-HMM LSTMs were allowed to select different lookbacks because the HMM feature changes the validation surface.
+
+After lookback selection, final LSTM test metrics were summarized as the mean and standard deviation across the five seed-level runs at the selected lookback. The reported controlled table is therefore not a single best-seed result. For ROC and precision-recall plots, seed-level LSTM probabilities were averaged across the selected seeds to produce one curve per ticker and model.
+
+The logistic-regression benchmark used the 15 current-row technical features, not an LSTM sequence. It was fitted separately by ticker using \texttt{LogisticRegression} with no class weighting, maximum 5000 iterations, and \(C\in\{0.01,0.1,1.0,10.0\}\). The value of \(C\) was selected by validation ROC-AUC, with the smaller \(C\) preferred in ties.
+
+For all probability-producing models, the binary decision threshold was selected on validation rows after the probability model was fixed. The controlled threshold grid was 0.35 to 0.65 in increments of 0.01. The selected threshold was
+\[
+\tau^*=\arg\max_{\tau} \operatorname{BA}_{\mathrm{validation}}(\tau),
+\]
+with ties resolved by choosing the value closest to 0.50 and then the smaller threshold. Test labels and test probabilities did not affect lookback, regularization, threshold, or architecture selection.
+
+\subsection{Benchmark Models}
+
+The controlled comparison included six model families for each ticker. The train-majority baseline used the training positive-class share as a constant probability and applied a 0.50 threshold. Because the training positive-class share exceeded 0.50 for all three tickers, this baseline predicted the up class for all validation and test rows.
+
+The persistence baseline predicted that next week's direction would match the current week's direction, using \(\mathbf{1}\{\texttt{Weekly\_Log\_Return}>0\}\) as a probability-like score. The HMM-only benchmark used \texttt{HMM\_Up\_Prob\_Raw} directly as a probability forecast, with a validation-selected threshold. The technical logistic regression provided a deterministic linear benchmark using only current technical features. The technical-only LSTM tested whether a compact sequence model improved on simpler models. The technical-plus-HMM LSTM tested the primary incremental-value question by adding \texttt{HMM\_Up\_Prob\_Scaled} to the otherwise identical technical sequence.
+
+\subsection{Chronological Evaluation and Leakage Controls}
+
+Several leakage controls were implemented. First, splits were chronological and ticker-specific, and were assigned using \texttt{Target\_Date}. Second, technical-feature scalers were fitted separately by ticker using training rows only. Third, each fixed-split HMM and its observation scaler were fitted on training rows only. Fourth, HMM state labels and state positive-return rates were estimated using training rows only. Fifth, the HMM probability entering the LSTM was scaled using a separate ticker-specific scaler fitted on training rows only. Sixth, validation data were used only for model selection and threshold selection, while test data were reserved for final evaluation.
+
+The sequence-construction rule allows a validation or test sequence to contain earlier historical input rows from a previous split. This is a causal design choice because those earlier observations would have been known at the time of the target week. The split of the sequence is determined by the target row rather than by the earliest row in the lookback window.
+
+The rolling AAPL/IBM replication extended these controls by refitting HMMs and scalers separately inside each fold. It used expanding training windows, 52-week validation windows, and 52-week test windows. This analysis is reported as a secondary robustness check because its feature variants were not identical to the primary all-ticker fixed-split ablation.
+
+\subsection{Evaluation Metrics}
+
+ROC-AUC was used to evaluate threshold-independent ranking performance. Precision-recall AUC was included because the positive class was moderately more common than the negative class in several splits. Balanced accuracy was used as the main thresholded classification metric because it averages sensitivity and specificity:
+\[
+\operatorname{BA}=\frac{1}{2}\left(\frac{TP}{TP+FN}+\frac{TN}{TN+FP}\right).
+\]
+F1, raw accuracy, Cohen's kappa, confusion-matrix counts, predicted up share, and actual up share were also saved to diagnose class-balance behavior. Brier score and log-loss were used as probability-quality metrics. F1 was not interpreted alone as evidence of strong discrimination because a model can obtain a high F1 score by predicting the majority positive class frequently.
+
+No formal bootstrap confidence interval, paired block bootstrap, DeLong test, or McNemar test was implemented for the final controlled comparison. Seed-level standard deviations and fold-level rolling summaries provide useful instability diagnostics, but very small metric differences should be treated as practically indistinguishable unless supported by a formal uncertainty analysis.
+
+\subsection{Secondary and Robustness Analyses}
+
+Secondary analyses examined whether the primary conclusion was sensitive to broader context or HMM specification. Volatility-context experiments added VIX and VXN features. QQQ and market-relative experiments added market ETF and relative-return variables, with recession/expansion context in the larger exploratory grid. HMM robustness checks compared the primary univariate two-state HMM with richer two-state and three-state HMM specifications. Target-overlap and calibration diagnostics examined whether HMM probabilities aligned with the next-week target. The rolling AAPL/IBM replication tested paired base-versus-HMM LSTM variants across multiple out-of-sample folds with fold-specific HMM and scaler refitting.
+
+These analyses are useful for robustness and interpretation, but they are not the primary controlled estimand. The Methodology therefore separates them from the main technical-only versus technical-plus-HMM LSTM ablation and avoids treating the best isolated result from a broad exploratory grid as confirmatory evidence.

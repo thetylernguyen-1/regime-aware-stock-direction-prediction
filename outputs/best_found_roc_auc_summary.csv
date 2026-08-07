@@ -1,0 +1,4 @@
+Ticker,Best_Test_ROC_AUC,Feature_Config,Feature_Label,Architecture,Lookback,N_Test_Rows,Source_File
+AAPL,0.6086838534599729,vol_market_context_qqq_hmm,Vol + Market + QQQ + HMM,stacked,12,122,outputs/weekly_context_lstm_qqq_final/weekly_context_lstm_qqq_final_predictions.csv
+IBM,0.6987612612612613,vol_market_context_qqq,Vol + Market + QQQ,stacked,8,122,outputs/weekly_context_lstm_qqq_final/weekly_context_lstm_qqq_final_predictions.csv
+MSFT,0.6631118403062619,vol_market_context_qqq,Vol + Market + QQQ,stacked,8,122,outputs/weekly_context_lstm_qqq_final/weekly_context_lstm_qqq_final_predictions.csv
